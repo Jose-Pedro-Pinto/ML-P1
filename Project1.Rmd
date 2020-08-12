@@ -1,0 +1,1427 @@
+---
+title: "Bias-Variance Practical Assignment"
+author: "José Pinto, Nirbhaya Shaji"
+date: "28/02/2020"
+output:
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Intruduction
+
+The bias-variance trade off is an important characteristic of machine learning processes that has to be
+considered when making decisions about a learning task. Poor decisions can lead to poor a generalization
+ability of the models and a failure of the learning task. It is important to know how methods and models
+behave with different parameter values. Expressive models have a high bias and low variance. Less expressive
+models have low bias and high variance.
+
+## Goals
+
+The goal of this assignment is to study the bias-variance trade off and expressivness of diferent models.<br>
+In order to complete that goal we must train and test a variety of regression models, plot and describe the
+training and test error and their evolution as we change parameters. We need to figure out wich parameters
+increase the model expressivness and how they change it.
+
+## Models
+
+For this assignment a variety of models will be used.<br>
+The models are <b>kNN, linear regression, LDA, QDA, Logistic regression, decision trees, polinomial regression</b> and <b>random forests</b>.<br> 
+The models have different levels of complexity, for this analisys the models ca be seen as having low, medium an high complexity.<br>
+Models with <b>low</b> complexity are <b>knn, linear regression</b> and <b>decision trees</b>.<br>
+Models with <b>meduim</b> complexity are <b>LDA, QDA</b> and <b>Logistic regression</b>.<br>
+Models with <b>high</b> complexity are <b>polinomial regression</b> and <b>random forests.</b><br>
+
+## Dataset
+
+The dataset we are going to work with is the "Pima Indians Diabetes" dataset available in the "mlbench"
+library. The dataset contains information about the presence of diabetes in a population.<br>
+
+The dataset is comprised of a total of 768 observations (rows) and 9 variables (columns), 1 target and 8
+predictors.<br>
+The variables are as follows:<br>
+Target variable:<br>
+<b>diabetes</b> - Presence of abcense of diabetes (test for diabetes) (binary)<br>
+
+predictor variables:<br>
+<b>pregnant</b> - Number of times pregnant(integer value)<br>
+<b>glucose</b>	- Plasma glucose concentration (glucose tolerance test) (integer value)<br>
+<b>pressure</b> - Diastolic blood pressure (mm Hg) (integer value)<br>
+<b>triceps</b> -	Triceps skin fold thickness (mm) (integer value))<br>
+<b>insulin</b> -	2-Hour serum insulin (mu U/ml) (integer value)<br>
+<b>mass</b> - Body mass index (weight in kg/(height in m)\^2) (decimal value)<br>
+<b>pedigree</b> - Diabetes pedigree function (decimal value)<br>
+<b>age</b> - Age (years) (integer value)<br>
+
+Due to the nature of the target this is a classification problem where we predict
+"neg" or "pos", negative or positive diabetes.<br>
+
+All the required libaries are imported here to more easily identify dependencies.<br>
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(mlbench)
+library(class)
+library(GGally)
+library(magrittr)
+library(MASS)
+library(hmeasure)
+library(randomForest)
+library(reshape2)
+library(glmnet)
+library(ggplot2)
+library(reshape2)
+```
+
+Import the data and check variable types.<br>
+
+```{r dataset}
+data(PimaIndiansDiabetes)
+str(PimaIndiansDiabetes)
+```
+
+First entries of the data.<br>
+
+```{r head}
+head(PimaIndiansDiabetes)
+```
+
+Summary of data distribution.<br>
+
+```{r summary}
+summary(PimaIndiansDiabetes)
+```
+
+Scatterplots, histograms, boxplots and correlation of data.<br>
+
+```{r pairs}
+PimaIndiansDiabetes %>% ggpairs(.,mapping=ggplot2::aes(colour=diabetes));
+```
+
+From the plots and summarys we spot no strong multicollinarity.<br>
+
+```{r seed}
+#set the seed so we can replicate results
+set.seed(123)
+```
+## Data Split
+
+Now that we have the data we split it into train and test data.<br>
+
+```{r dataSplit}
+#set the target column
+targetColumn = 9
+#set percentage of data for training to 80%
+trainPercent = 0.8
+#get the amount of rows for training
+trainSize = floor(trainPercent*nrow(PimaIndiansDiabetes))
+#get the indices of the rows for training
+trainRows = sample(nrow(PimaIndiansDiabetes),trainSize,replace = FALSE)
+#get the rows with the training indices
+trainDiabetes = PimaIndiansDiabetes[trainRows,-targetColumn]
+trainDiabetesY = PimaIndiansDiabetes[trainRows,targetColumn]
+#get the rows that are not training indices (test data)
+testDiabetes = PimaIndiansDiabetes[-trainRows,-targetColumn]
+testDiabetesY = PimaIndiansDiabetes[-trainRows,targetColumn]
+```
+
+## Knn
+
+The knn method creates a model with all points in the training data.<br>
+For prediction it finds what are the k nearest neighbours and returns the most common
+class.<br>
+The value k of neighbours is the only hyperparameter to tune. It is expected that with
+the increase in k the bias will increase and the variance will decrease, meaning as k
+increases the expressivness will decrease.<br>
+The model is capable of both the highest and lowest expressivness of all models tested,
+with k equal to the number of examples in the training data it predicting no more than
+the mode (the most common value in the whole data).<br>
+
+```{r knn}
+error = data.frame()
+
+#get models, predictions and error for different values of k
+for(k in seq(1,100,2)){
+  trainDiabetesPred = knn(trainDiabetes,trainDiabetes,trainDiabetesY,k=k)
+  testDiabetesPred = knn(trainDiabetes,testDiabetes,trainDiabetesY,k=k)
+  trainError = 1 - sum(trainDiabetesPred==trainDiabetesY)/length(trainDiabetesY)
+  testError = 1 - sum(testDiabetesPred==testDiabetesY)/length(testDiabetesY)
+  
+  error = rbind(error,data.frame(k,trainError,testError))
+}
+
+#get the maximum value of error (to set the max y value in the plot)
+maxY = max(error$trainError,error$testError)
+
+#create the empty plot with some parameters
+plot(error[,1],main="Evolution of the train and test errors",xlab="Number of NN (k)",ylab="Error",ylim = c(0,maxY),type="n",xaxt="n")
+#set the axis for the number of neighbours (k)
+axis(1, 1:length(error[,1]), error[,1])
+#plot the error for the training data
+lines(error[,2],type="b",col='red',pch=20)
+#plot the error for the testing data
+lines(error[,3],type="b",col='blue',pch=20)
+
+legend("bottomright",lty=1,col=c("red","blue"),legend = c("Train ", "Test "))
+```
+
+We can see in the graph above the confirmation of what was stated before, with
+the training error increasing and testing error decreasing as we increase k.<br>
+
+From now on we will use the value 13 for k as it has a good train and test error.<br>
+
+## Decision boundaries
+
+```{r knnb}
+boundaryKNN <- function(X, Y, k, resolution = 100, newData = NULL, newDataY = NULL) {
+  if(is.null(newData)){
+    newData = X
+    newDataY = Y
+  }
+  
+  #get ranes for the data (min and max)
+  ranges <- sapply(newData[,c(1:2)], range)
+  #get n points bettwen the ranges
+  xAxis <- seq(ranges[1,1], ranges[2,1], length.out = resolution)
+  yAxis <- seq(ranges[1,2], ranges[2,2], length.out = resolution)
+  #create a grid of points
+  grid <- data.frame(expand.grid(xAxis,yAxis))
+  
+  #get the predicted values for the grid
+  pred <- knn(X, grid, Y, k=k)
+  #get the values as 0 and 1
+  numericPred = as.numeric(pred)-1
+  
+  plotz<-ggplot(data=grid, aes(grid[,1], grid[,2])) +
+    #place background color for predicions
+    geom_point(aes(colour=pred), size=4,shape=16,alpha=.02) +
+    #place prediction borders
+    geom_contour(aes(z=numericPred), colour='black', size = 1,alpha=1) +
+    #place data points
+    geom_point(data=newData, aes(newData[,1], newData[,2], colour=newDataY),size=3,shape=16,alpha=.8)+
+    #select display colors
+    scale_color_manual(values=c("#A4A4A4", "#E61616")) +
+    theme_bw() +
+    #set x and y labels
+    xlab(names(X)[1]) +
+    ylab(names(X)[2])
+
+  return(plotz)
+}
+
+```
+
+
+Now we will present the decision boundaries for the model.<br>
+First the boundaries for subsets of two atributes.<br>
+From all the possible subsets of two variables two where selected.<br>
+
+The first one shows good separation of the data and not a lot of overfitting.<br>
+
+```{r knnBoundary1}
+k=13
+print(boundaryKNN(trainDiabetes[,c("glucose","mass")],trainDiabetesY,k))
+```
+
+The second one creates an interesting pattern, with vertical lines.<br>
+This is probably due to the high amount of insulin with value 0.<br>
+
+```{r knnBoundary2}
+print(boundaryKNN(trainDiabetes[,c("insulin","pedigree")],trainDiabetesY,k))
+```
+
+
+Now we are going to draw the decision boundaries obtained by the first two components of
+PCA (principal component analisis).<br>
+
+First we obtain the PCA transformation of the data and change it for plotting.<br>
+
+```{r knnBoundaryPCASetup}
+#get number of columns
+ncols = length(trainDiabetes)
+
+#get the principal components
+diabetesPCA = prcomp(trainDiabetes, center = TRUE,scale. = TRUE)
+#transform the training data into its principal components
+diabetesPC = predict(diabetesPCA,trainDiabetes)[,1:2]
+```
+
+Then we create a grid in the full dimentional space, make predictions in it and transform
+it into the PCA space.<br>
+
+```{r knnBoundaryPCAPredictGrid}
+#create axis for the grid in the full dimentional space
+gridAxis = c()
+for(column in seq(1,ncols,1)){
+  gridAxis = c(
+    gridAxis,
+    #get n equally spaced values bettwen the minimum of the column and the maximum 
+    list(seq(
+      min(trainDiabetes[,column]),
+      max(trainDiabetes[,column]),
+      #number n of values (low due to high dimentionality)
+      length.out = 3
+    ))
+  )
+}
+#create a grid with all combinations of all axis
+grid = data.frame(as.matrix(expand.grid(gridAxis)))
+#set column names to names of training data(required to convert to pca)
+names(grid) = names(trainDiabetes)
+#convert grid values to pca space
+gridPCA = predict(diabetesPCA,grid)[,1:2]
+
+#get the predicted values for each element of the grid
+pred = factor(knn(trainDiabetes,grid,trainDiabetesY,k=k))
+levels(pred) = c("neg","pos")
+#plot the contours and add the points
+boundaryKNN(
+  data.frame(gridPCA),
+  pred,
+  k=1,
+  newData=data.frame(diabetesPC),
+  newDataY=trainDiabetesY
+)
+
+```
+
+## Linear regression 
+
+Change the categorical target to numerical (neg = 0 and pos = 1).<br>
+
+```{r LinearRegressionPreprocess}
+trainDiabetesY_num = as.numeric(trainDiabetesY) - 1
+testDiabetesY_num = as.numeric(testDiabetesY) - 1
+```
+
+linear model<br>
+
+```{r LinearRegressionModel}
+lm = lm(trainDiabetesY_num~.,data = trainDiabetes)
+summary(lm)
+```
+
+R-squared:  0.2883 > not so good. remove NA may be?<br>
+
+```{r LinearRegressionPredictions}
+trainDiabetesPred = predict(lm,trainDiabetes)
+tableTrain = table(trainDiabetesY_num,trainDiabetesPred>0.5)
+tableTrain
+
+testDiabetesPred = predict(lm,testDiabetes)
+tableTest = table(testDiabetesY_num,testDiabetesPred>0.5)
+tableTest
+```
+
+```{r LinearRegressionError}
+trainError = 1 - sum(diag(tableTrain))/sum(tableTrain)
+trainError
+
+testError = 1 - sum(diag(tableTest))/sum(tableTest)
+testError
+
+error = data.frame()
+error = rbind(error,data.frame(trainError,testError))
+error
+```
+
+```{r LinearRegressionAccuracy}
+lscm <- function(regmodel, observation){
+  val <- predict.lm(regmodel,observation)
+  sapply(val,function(v) if(v<0.5) 0 else 1 )
+}
+
+# classes obtained with linear regression as 0 and 1 (test)
+testPred_binary = lscm(lm, data.frame(y = NA, testDiabetes))
+accuracytest<- sum(testPred_binary == testDiabetes)/nrow(testDiabetes)*100 # 
+accuracytest
+```
+
+## Polynomial regression 
+
+```{r Polynomial Regression}
+y = trainDiabetesY_num
+trainx = data.matrix(trainDiabetes, rownames.force = NA)
+testx = data.matrix(testDiabetes, rownames.force = NA)
+
+#Squared
+
+trainxSquare = trainx^2
+testxSquare = testx^2
+
+lm.Square = lm(y ~ .,data=data.frame(trainx,trainxSquare))
+summary(lm.Square)
+# R2 0.344 still not so good! but better than simple linear
+
+trainDiabetesPredSquare =  predict(lm.Square,data.frame(trainx,trainxSquare))
+tableTrainSquare = table(trainDiabetesY_num,trainDiabetesPredSquare>0.5)
+tableTrainSquare
+# trainDiabetesY_num FALSE TRUE
+# 0   366   35
+# 1    94  119
+trainErrorSquare = 1 - sum(diag(tableTrainSquare))/sum(tableTrainSquare)
+trainErrorSquare
+# 0.2100977
+
+toClass <- function(trainDiabetesPredSquare){
+  val <- trainDiabetesPredSquare
+  sapply(val,function(v) if(v<0.5) 0 else 1 )
+}
+
+trainDiabetesPredSquare_toclass = as.numeric(toClass(trainDiabetesPredSquare))
+
+testDiabetesPredSquare = predict(lm.Square,data.frame(testx,testxSquare))
+tableTestSquare = table(testDiabetesY_num,testDiabetesPredSquare>0.5)
+tableTestSquare
+# testDiabetesY_num FALSE TRUE
+# 0    90    9
+# 1    25   30
+testErrorSquare = 1 - sum(diag(tableTestSquare))/sum(tableTestSquare)
+testErrorSquare
+# [1] 0.2207792
+
+
+
+testPredSquare_binary = lscm(lm.Square, data.frame(y = NA, data.frame(testx,testxSquare))) # classes obtained with linear regression as 0 and 1 (test)
+accuracytestSquare = sum(testPredSquare_binary == testDiabetesY_num)/nrow(testDiabetes)*100 
+accuracytestSquare
+# [1] 77.92208 
+x = misclassCounts(testPredSquare_binary,testDiabetesY_num)
+x$metrics$Sens
+# [1] 0.5454545
+
+
+# ER      Sens      Spec Precision    Recall       TPR        FPR         F    Youden
+# 1 0.2207792 0.5454545 0.9090909 0.7692308 0.5454545 0.5454545 0.09090909 0.6382979 0.4545455
+
+##Cubic
+
+trainxCubic = trainx^3
+testxCubic = testx^3
+
+lm.Cubic = lm(y ~ .,data=data.frame(trainx,trainxSquare,trainxCubic))
+summary(lm.Cubic)
+# R2 0.3567 still not so good but better than Square
+
+trainPredCubic_binary_toClass = lscm(lm.Cubic, data.frame(y = NA, data.frame(trainx,trainxSquare,trainxCubic)))
+trainDiabetesPredCubic =  predict(lm.Cubic,data.frame(trainx,trainxSquare,trainxCubic))
+tableTrainCubic = table(trainDiabetesY_num,trainDiabetesPredCubic>0.5)
+tableTrainCubic
+# trainDiabetesY_num FALSE TRUE
+# 0   351   50
+# 1    89  124
+trainErrorCubic = 1 - sum(diag(tableTrainCubic))/sum(tableTrainCubic)
+trainErrorCubic
+# [1] 0.2263844
+
+
+testDiabetesPredCubic = predict(lm.Cubic,data.frame(testx,testxSquare,testxCubic))
+tableTestCubic = table(testDiabetesY_num,testDiabetesPredCubic>0.5)
+tableTestCubic
+# testDiabetesY_num FALSE TRUE
+# 0    88   11
+# 1    25   30
+testErrorCubic = 1 - sum(diag(tableTestCubic))/sum(tableTestCubic)
+testErrorCubic
+# [1] 0.2337662 
+
+
+testPredCubic_binary = lscm(lm.Cubic, data.frame(y = NA, data.frame(testx,testxSquare,testxCubic))) # classes obtained with linear regression as 0 and 1 (test)
+accuracytestCubic = sum(testPredCubic_binary == testDiabetesY_num)/nrow(testDiabetes)*100 
+accuracytestCubic
+# [1] 76.62338
+x = misclassCounts(testPredCubic_binary,testDiabetesY_num)
+x$metrics$Sens
+#0.5454545
+
+
+# ER      Sens      Spec Precision    Recall       TPR       FPR     F    Youden
+# 1 0.2337662 0.5454545 0.8888889 0.7317073 0.5454545 0.5454545 0.1111111 0.625 0.4343434
+
+##Quartic
+
+
+
+trainxQuartic = trainx^4
+testxQuartic = testx^4
+
+lm.Quartic = lm(y ~ .,data=data.frame(trainx,trainxSquare,trainxCubic,trainxQuartic))
+summary(lm.Quartic)
+# R2 0.3649 still not so good but better than Square and Cubic
+
+testPredQuartic_binary_toClass = lscm(lm.Quartic, data.frame(y = NA, data.frame(trainx,trainxSquare,trainxCubic,trainxQuartic)))
+trainDiabetesPredQuartic =  predict(lm.Quartic,data.frame(trainx,trainxSquare,trainxCubic,trainxQuartic))
+tableTrainQuartic = table(trainDiabetesY_num,trainDiabetesPredQuartic>0.5)
+tableTrainQuartic
+# trainDiabetesY_num FALSE TRUE
+# 0   356   45
+# 1    86  127
+trainErrorQuartic = 1 - sum(diag(tableTrainQuartic))/sum(tableTrainQuartic)
+trainErrorQuartic
+# 0.213355
+
+
+testDiabetesPredQuartic = predict(lm.Quartic,data.frame(testx,testxSquare,testxCubic,testxQuartic))
+tableTestQuartic = table(testDiabetesY_num,testDiabetesPredQuartic>0.5)
+tableTestQuartic
+# testDiabetesY_num FALSE TRUE
+# 0    86   13
+# 1    23   32
+testErrorQuartic = 1 - sum(diag(tableTestQuartic))/sum(tableTestQuartic)
+testErrorQuartic
+# [1] 0.2337662 same as cubic!
+
+
+testPredQuartic_binary = lscm(lm.Quartic, data.frame(y = NA, data.frame(testx,testxSquare,testxCubic,testxQuartic))) # classes obtained with linear regression as 0 and 1 (test)
+accuracytestQuartic = sum(testPredQuartic_binary == testDiabetes)/nrow(testDiabetes)*100 
+accuracytestQuartic
+# [1] 68.83117 #least accurate
+x = misclassCounts(testPredQuartic_binary,testDiabetesY_num)
+x$metrics$Sens
+# 0.5818182
+
+
+
+##quintic
+
+
+trainxQuintic = trainx^5
+testxQuintic = testx^5
+
+lm.Quintic = lm(y ~ .,data=data.frame(trainx,trainxSquare,trainxCubic,trainxQuartic,trainxQuintic))
+summary(lm.Quintic)
+# R2 0.3692 still not so good but better than Square Cubic and Quartic 
+
+testPredQuintic_binary_toClass = lscm(lm.Quintic, data.frame(y = NA, data.frame(trainx,trainxSquare,trainxCubic,trainxQuartic,trainxQuintic)))
+  trainDiabetesPredQuintic =  predict(lm.Quintic,data.frame(trainx,trainxSquare,trainxCubic,trainxQuartic,trainxQuintic))
+tableTrainQuintic = table(trainDiabetesY_num,trainDiabetesPredQuintic>0.5)
+tableTrainQuintic
+# trainDiabetesY_num FALSE TRUE
+# 0   353   48
+# 1    89  124
+trainErrorQuintic = 1 - sum(diag(tableTrainQuintic))/sum(tableTrainQuintic)
+trainErrorQuintic
+# 0.223127
+
+
+
+testDiabetesPredQuintic = predict(lm.Quintic,data.frame(testx,testxSquare,testxCubic,testxQuartic,testxQuintic))
+tableTestQuintic = table(testDiabetesY_num,testDiabetesPredQuintic>0.5)
+tableTestQuintic
+# testDiabetesY_num FALSE TRUE
+# 0    86   13
+# 1    24   31
+testErrorQuintic = 1 - sum(diag(tableTestQuintic))/sum(tableTestQuintic)
+testErrorQuintic
+# [1] [1] 0.2402597
+
+
+
+testPredQuintic_binary = lscm(lm.Quintic, data.frame(y = NA, data.frame(testx,testxSquare,testxCubic,testxQuartic,testxQuintic))) # classes obtained with linear regression as 0 and 1 (test)
+accuracytestQuintic = sum(testPredQuintic_binary == testDiabetes)/nrow(testDiabetes)*100 
+accuracytestQuintic
+# [1] 70.77922 
+x = misclassCounts(testPredQuintic_binary,testDiabetesY_num)
+x$metrics$Sens
+# 0.5636364
+
+# ER      Sens      Spec Precision    Recall       TPR       FPR         F    Youden
+# 1 0.2402597 0.5636364 0.8686869 0.7045455 0.5636364 0.5636364 0.1313131 0.6262626 0.4323232
+
+```
+
+## Logistic Regression
+
+```{r Logistic Regression}
+
+glm_model = glm(trainDiabetesY_num~.,data = trainDiabetes, family = binomial)
+summary(glm_model)
+
+glm_prob = predict.glm(glm_model,trainDiabetes,type='response')
+glm_predict = rep('neg',nrow(trainDiabetes))
+glm_predict[glm_prob>.5] = 'pos'
+glmTrain_table = table(pred=glm_predict,true=trainDiabetesY)
+glmTrain_table
+# pred  neg pos
+# neg 354  90
+# pos  47 123
+glm_trainError = 1 - sum(diag(glmTrain_table))/sum(glmTrain_table)
+glm_trainError
+# [1] 0.223127
+
+
+
+glm_prob = predict.glm(glm_model,testDiabetes,type='response')
+contrasts(PimaIndiansDiabetes$diabetes)
+glm_predict = rep('neg',nrow(testDiabetes))
+glm_predict[glm_prob>.5] = 'pos'
+glmTest_table = table(pred=glm_predict,true=testDiabetesY)
+glmTest_table
+# pred  neg pos
+# neg  87  24
+# pos  12  31
+glm_testError = 1 - sum(diag(glmTest_table))/sum(glmTest_table)
+glm_testError
+# 0.2337662
+
+
+
+glmAccuracy = mean(glm_predict==testDiabetesY)*100
+glmAccuracy
+# 76.62338
+x = misclassCounts(as.numeric(as.factor(glm_predict))-1,testDiabetesY_num)
+x$metrics$Sens
+# [1] 0.5636364
+
+
+
+# ER      Sens      Spec Precision    Recall       TPR       FPR         F    Youden
+# 1 0.2337662 0.5636364 0.8787879 0.7209302 0.5636364 0.5636364 0.1212121 0.6326531 0.4424242
+```
+
+```{r Lasso}
+
+#input the predictors as a matrix and the class labels as a vector (numeric)
+
+x = model.matrix(trainDiabetesY_num~.,trainDiabetes)
+y = trainDiabetesY_num
+set.seed(2322111)
+cv.out = cv.glmnet(x,y,alpha=1,family='binomial',type.measure = 'mse' )
+plot(cv.out)
+
+#min value of lambda
+lambda_min = cv.out$lambda.min
+#best value of lambda
+lambda_1se = cv.out$lambda.1se
+#regression coefficients
+coef(cv.out,s=lambda_1se)
+# 10 x 1 sparse Matrix of class "dgCMatrix"
+# 1
+# (Intercept) -5.277686156
+# (Intercept)  .          
+# pregnant     0.065718855
+# glucose      0.024448506
+# pressure     .          
+# triceps      .          
+# insulin      .          
+# mass         0.034426079
+# pedigree     0.118308012
+# age          0.005109729
+
+
+x_train = model.matrix(trainDiabetesY_num~.,trainDiabetes)
+
+lasso_probtrain <- predict(cv.out,newx = x_train,s=lambda_1se,type='response')
+lasso_predicttrain <- rep('neg',nrow(trainDiabetes))
+lasso_predicttrain[lasso_probtrain>.5] <- 'pos'
+lassoTrain_table = table(pred=lasso_predicttrain,true=trainDiabetesY_num)
+lasso_trainError = 1 - sum(diag(lassoTrain_table))/sum(lassoTrain_table)
+lasso_trainError
+# 0.2263844
+
+
+#get test data
+x_test = model.matrix(testDiabetesY_num~.,testDiabetes)
+#predict class, type=”class”
+lasso_prob <- predict(cv.out,newx = x_test,s=lambda_1se,type='response')
+#translate probabilities to predictions
+lasso_predict <- rep('neg',nrow(testDiabetes))
+lasso_predict[lasso_prob>.5] <- 'pos'
+#confusion matrix
+lassoTest_table = table(pred=lasso_predict,true=testDiabetesY_num)
+# red   0  1
+# neg 89 28
+# pos 10 27
+#accuracy
+ 
+
+# pred   0  1
+# neg 90 26
+# pos  9 29
+
+lasso_testError = 1 - sum(diag(lassoTest_table))/sum(lassoTest_table)
+lasso_testError
+# 0.2467532
+
+
+mean(lasso_predict==testDiabetesY)
+#[1] 0.7532468
+x = misclassCounts(as.numeric(as.factor(lasso_predict))-1,testDiabetesY_num)
+x$metrics$Sens
+# 0.4909091
+
+```
+
+```{r Lasso + Ridge - Elastic net}
+########## elstic net (Ridge + Lasso)
+
+x = model.matrix(trainDiabetesY_num~.,trainDiabetes)
+y = trainDiabetesY_num
+set.seed(2322111)
+cv.out = cv.glmnet(x,y,alpha=1,family='binomial',type.measure = 'mse', relax = TRUE)
+plot(cv.out)
+
+#min value of lambda
+lambda_min = cv.out$lambda.min
+#best value of lambda
+lambda_1se = cv.out$lambda.1se
+#regression coefficients
+coef(cv.out,s=lambda_1se)
+# 10 x 1 sparse Matrix of class "dgCMatrix"
+# 1
+# (Intercept) -5.277686156
+# (Intercept)  .          
+# pregnant     0.065718855
+# glucose      0.024448506
+# pressure     .          
+# triceps      .          
+# insulin      .          
+# mass         0.034426079
+# pedigree     0.118308012
+# age          0.005109729
+
+x_train = model.matrix(trainDiabetesY_num~.,trainDiabetes)
+lasso_probtrain <- predict(cv.out,newx = x_train,s=lambda_1se,type='response')
+lasso_predicttrain <- rep('neg',nrow(trainDiabetes))
+lasso_predicttrain[lasso_probtrain>.5] <- 'pos'
+lassoTrain_table = table(pred=lasso_predicttrain,true=trainDiabetesY_num)
+lasso_trainError = 1 - sum(diag(lassoTrain_table))/sum(lassoTrain_table)
+lasso_trainError
+# 0.223127
+
+
+
+#get test data
+x_test = model.matrix(testDiabetesY_num~.,testDiabetes)
+#predict class, type=”class”
+lasso_prob <- predict(cv.out,newx = x_test,s=lambda_1se,type='response')
+#translate probabilities to predictions
+lasso_predictEla <- rep('neg',nrow(testDiabetes))
+lasso_predictEla[lasso_prob>.5] <- 'pos'
+#confusion matrix
+lassoTest_table =  table(pred=lasso_predictEla,true=testDiabetesY_num)
+
+# pred   0  1
+# neg 90 26
+# pos  9 29
+
+lasso_testError = 1 - sum(diag(lassoTest_table))/sum(lassoTest_table)
+lasso_testError
+# 0.2402597 
+
+
+#accuracy
+mean(lasso_predictEla==testDiabetesY)
+#[1] 0.7597403
+misclassCounts(as.numeric(as.factor(lasso_predictEla))-1,testDiabetesY_num)
+#Sensitivity 0.5272727
+
+```
+
+```{r Sensitivity and Error Plots}
+
+predictionsName = c('testPred_binary','testPredSquare_binary','testPredCubic_binary','testPredQuartic_binary',
+                 'testPredQuintic_binary','glm_predict','lasso_predict','lasso_predictEla')
+
+
+predFrame = as.data.frame(matrix(nrow=length(testDiabetesY_num)),ncol=0)
+predFrame$testPred_binary = testPred_binary
+predFrame$testPredSquare_binary = testPredSquare_binary
+predFrame$testPredCubic_binary = testPredCubic_binary
+predFrame$testPredQuartic_binary = testPredQuartic_binary
+predFrame$testPredQuintic_binary = testPredQuintic_binary
+#predFrame$glm_predict = glm_predict
+predFrame$glm_predict = as.numeric(as.factor(glm_predict))-1
+predFrame$lasso_predict = as.numeric(as.factor(lasso_predict))-1
+predFrame$lasso_predictEla = as.numeric(as.factor(lasso_predictEla))-1
+predFrame = predFrame[,-1]
+
+metrics = data.frame()
+
+for(i in 1:ncol(predFrame)){
+  
+    metrics = rbind(metrics,as.data.frame(misclassCounts(predFrame[,i],testDiabetesY_num)$metrics))
+  
+}
+
+
+metrics$model = c('Liner Regretion','2nd Order Polynomial Regression','3rd Order Polynomial Regression','4th Order Polynomial Regression',
+                  '5th Order Polynomial Regression','Logistic Regression','Lasso','Elastic Net (Lasso + Ridge)')
+
+
+ggplot(data=metrics, aes(x = model , y = Sens, col=model))+ geom_point(aes(size = Sens)) + theme(axis.text.x = element_text(angle = 60, hjust = 1)) + theme(axis.title.x=element_blank(),axis.text.x=element_blank(),axis.ticks.x=element_blank()) + labs(y = "Sensitivity")
+
+errordt = data.frame()
+errordt = data.frame(train = c(0.2263844,0.2100977,0.2263844,0.213355,0.223127,0.223127,0.2263844,0.223127), test = c(0.2272727,0.2207792,0.2337662,0.2337662,0.2402597,0.2337662,0.2467532,0.2402597), model = c('Liner Regretion','2nd Order Polynomial Regression','3rd Order Polynomial Regression','4th Order Polynomial Regression',
+                                                                                                                      '5th Order Polynomial Regression','Logistic Regression','Lasso','Elastic Net (Lasso + Ridge)') )
+str(errordt)
+
+errordt = melt(errordt)
+ggplot(errordt, aes(variable, value, group=factor(model))) + geom_point(aes(color=factor(model)))
+
+ggplot(errordt, aes(variable, value, group=factor(model))) + geom_line(aes(color=factor(model),linetype=factor(model))) 
+
+```
+
+```{r Decision Boundry Nirbhaya}
+#So many. need to make some choices.
+```
+
+```{r LDA}
+PimaTrain<-trainDiabetes
+PimaTrain$diabetes<-trainDiabetesY
+PimaTest<-testDiabetes
+PimaTest$diabetes<-testDiabetesY
+
+lda.pima<-lda(diabetes~., data = PimaTrain)
+pred.ldatest.pima<-predict(lda.pima,PimaTest)$class
+pred.ldatrain.pima<-predict(lda.pima,PimaTrain)$class
+
+#QDA
+qda.pima<-qda(diabetes~., data = PimaTrain)
+pred.qdatest.pima<-predict(qda.pima,PimaTest)$class
+pred.qdatrain.pima<-predict(qda.pima,PimaTrain)$class
+
+
+#comparing stuff
+ldaqda=rbind(misclassCounts(as.numeric(pred.ldatest.pima)-1,as.numeric(testDiabetesY)-1)$metrics,
+             misclassCounts(as.numeric(pred.ldatrain.pima)-1,as.numeric(trainDiabetesY)-1)$metrics,
+             misclassCounts(as.numeric(pred.qdatest.pima)-1,as.numeric(testDiabetesY)-1)$metrics,
+             misclassCounts(as.numeric(pred.qdatrain.pima)-1,as.numeric(trainDiabetesY)-1)$metrics)
+ldaqda$model<-c("LDATest","LDATrain","QDATest","QDATrain")
+
+
+ggplot()+geom_point(data=ldaqda,aes(x=model,y=Sens,colour=model))
+
+
+```
+
+```{r RandomForestNTree}
+#TREE NUMBER
+
+oob.err<-double(500)
+ptest.err<-double(500)
+ntest.err<-double(500)
+test.err<-data.frame()
+train.err<-data.frame()
+
+for(ntree in seq(1,500)) {
+  rf.model<-randomForest(diabetes ~ . , data = PimaTrain ,mtry=4,ntree=ntree) 
+  oob.err[ntree] = rf.model$err.rate[ntree,1] 
+  ptest.err[ntree]<-rf.model$err.rate[ntree,2]
+  ntest.err[ntree]<-rf.model$err.rate[ntree,3]
+  
+  pred<-predict(rf.model,PimaTest) 
+  predTrain<-predict(rf.model,PimaTrain)
+  test.err<- rbind(test.err,as.data.frame(misclassCounts(as.numeric(pred)-1,as.numeric(testDiabetesY)-1)$metrics))
+  train.err<- rbind(train.err,as.data.frame(misclassCounts(as.numeric(predTrain)-1,as.numeric(trainDiabetesY)-1)$metrics))
+  
+  
+  #cat(ntree," ") 
+  
+}
+
+
+#OOB, negative, positive in function of mtry
+plot(ntest.err,type="l",ylim=c(0.15, 0.5),xlim=c(0,500))
+lines(ptest.err,col="red")
+lines(oob.err,col="green")
+
+
+#performance evaluatores in function of mtry
+test.err$id = row.names(test.err)
+test.err.long<-melt(test.err,id.vars="id")
+
+train.err$id=row.names(train.err)
+train.err.long<-melt(train.err,id.vars="id")
+ggplot()+geom_line(data=test.err.long,aes(x=as.numeric(id),y=value,colour=variable,group=variable),size=1)+xlab("ntree")+ylab("Criteria")
+
+ggplot()+geom_line(data=test.err,aes(x=as.numeric(id),y=Sens))+geom_line(data=train.err,aes(x=as.numeric(id),y=Sens),col="red")+xlab("Trees")
+```
+
+
+```{r RandomForestMaxPred}
+#PREDICTORS PER NODE
+
+test.err<-data.frame()
+train.err<-data.frame()
+
+
+
+for(mtry in 1:8) {
+  rf.model<-randomForest(diabetes ~ . , data = PimaTrain ,mtry=mtry,ntree=200) 
+  
+  pred<-predict(rf.model,PimaTest) 
+  predTrain<-predict(rf.model,PimaTrain)
+  test.err<- rbind(test.err,as.data.frame(misclassCounts(as.numeric(pred)-1,as.numeric(testDiabetesY)-1)$metrics))
+  train.err<- rbind(train.err,as.data.frame(misclassCounts(as.numeric(predTrain)-1,as.numeric(trainDiabetesY)-1)$metrics))
+  
+  cat(mtry," ")
+
+}
+
+test.err$id = row.names(test.err)
+train.err$id=row.names(train.err)
+test.err.long<-melt(test.err,id.vars="id")
+ggplot()+geom_line(data=test.err.long,aes(x=as.numeric(id),y=value,colour=variable,group=variable),size=1)+xlab("Predictors per Split")+ylab("Criteria")
+
+ggplot()+geom_line(data=test.err,aes(x=as.numeric(id),y=Sens))+geom_line(data=train.err,aes(x=as.numeric(id),y=Sens),col="red")+xlab("Predictors p/ Node")
+```
+
+
+```{r RandomForestMinNode}
+#NODESIZE
+
+test.err<-data.frame()
+train.err<-data.frame()
+
+for(nodesize in seq(1,40)) {
+  rf.model<-randomForest(diabetes ~ . , data = PimaTrain ,mtry=4,ntree=200,nodesize=nodesize) 
+  pred<-predict(rf.model,PimaTest) 
+  predTrain<-predict(rf.model,PimaTrain)
+  test.err<- rbind(test.err,as.data.frame(misclassCounts(as.numeric(pred)-1,as.numeric(testDiabetesY)-1)$metrics))
+  train.err<- rbind(train.err,as.data.frame(misclassCounts(as.numeric(predTrain)-1,as.numeric(trainDiabetesY)-1)$metrics))
+  
+  
+  cat(nodesize," ") 
+  
+}
+
+test.err$id = row.names(test.err)
+train.err$id=row.names(train.err)
+test.err.long<-melt(test.err,id.vars="id")
+
+ggplot()+geom_line(data=test.err.long,aes(x=as.numeric(id),y=value,colour=variable,group=variable),size=1)+xlab("Node Size")+ylab("Criteria")
+
+ggplot()+geom_line(data=test.err,aes(x=as.numeric(id),y=Sens))+geom_line(data=train.err,aes(x=as.numeric(id),y=Sens),col="red")+xlab("Node Size")
+
+```
+
+```{r Boundary plot function, works for a few models}
+boundaryplot <- function(model, data1, class = NULL, predict_type = "class",
+                             rezz = 150, showgrid = TRUE, ...) {
+  
+  if(!is.null(class)) cl <- data1[,class] else cl <- 1
+  data1 <- data1[,1:2]
+  
+  
+  
+  r <- sapply(data1[,c(1:2)], range, na.rm = TRUE)
+  xs <- seq(r[1,1], r[2,1], length.out = rezz)
+  ys <- seq(r[1,2], r[2,2], length.out = rezz)
+  g <- cbind(rep(xs, each=rezz), rep(ys, time = rezz))
+  colnames(g) <- colnames(r)
+  g <- as.data.frame(g)
+  
+  #if(is.list(model)) {
+  p <- predict(model, g)
+  if(is.list(p)) p <- p$class
+  p <- as.factor(p)
+  g$diabetes<-p
+  z <- matrix(as.integer(p), nrow = rezz, byrow = TRUE)
+  #}
+  #else {g$diabetes<-model} 
+  g$z <- c(0, 1)[sapply(g$diabetes, as.numeric)]
+  
+  data1$diabetes<-cl
+  
+  plotz<-ggplot(data=g, aes(g[,1], g[,2])) +
+    geom_point(aes(colour = diabetes), size=4,shape=16,alpha=.02) +
+    geom_contour(aes(z=z), colour='black', size = 1,alpha=1) +
+    geom_point(data=data1, aes(data1[,1], data1[,2], colour=data1[,3]),size=3,shape=16,alpha=.8) +
+    scale_color_manual(values=c("#A4A4A4", "#E61616")) +
+    theme_bw() +
+    xlab(names(data1)[1]) +
+    ylab(names(data1)[2])
+  
+  return(plotz)
+  
+}
+```
+
+
+```{r pre-processing just for fun}
+#mean imputation, normalize, PCA
+
+PimaIndiansDiabetes[PimaIndiansDiabetes==0]<-NA
+
+
+NA2mean <- function(x) replace(x, is.na(x), mean(x, na.rm = TRUE))
+dftest<-replace(PimaIndiansDiabetes, TRUE, lapply(PimaIndiansDiabetes, NA2mean))
+
+normalize1 <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+
+
+for(i in 1:8){
+  dftest[,i]<-normalize1(dftest[,i])
+} 
+
+pima.pca.norm<-prcomp(dftest[,c(1:8)],center=TRUE,scale.=TRUE)
+
+summary(pima.pca.norm)
+
+pima.pca.norm.pred = predict(pima.pca.norm,dftest[,c(1:8)])
+
+df8<-cbind(as.data.frame(pima.pca.norm.pred[,c(1,2)]),PimaIndiansDiabetes$diabetes)
+names(df8)[names(df8)=="PimaIndiansDiabetes$diabetes"]<-"diabetes"
+
+lda.df8<-lda(diabetes~.,data=df8)
+qda.df8<-qda(diabetes~.,data=df8)
+rf.df8<-randomForest(diabetes ~ . , data = df8,ntree=200,nodesize=12)
+
+
+
+
+```
+
+
+```{r LDA plot}
+boundaryplot(lda.df8,df8,class="diabetes",main="LDA")
+```
+
+
+```{r QDA plot}
+
+boundaryplot(qda.df8,df8,class="diabetes",main="QDA")
+```
+
+
+```{r RF plot}
+boundaryplot(rf.df8,df8,class="diabetes",main="Random Forest")
+```
+
+```R
+fit <- rpart(trainDiabetesY~., data = trainDiabetes, method = 'class')
+```
+# Decision Tree
+
+```R
+rpart.plot(fit, extra = )
+```
+```R
+predict_unseen <-predict(fit, testDiabetes, type = 'class')
+```
+
+
+```R
+table = table(testDiabetesY, predict_unseen)
+```
+
+
+```R
+table
+```
+```R
+accuracy_test <- sum(diag(table)) / sum(table)
+```
+
+```R
+metrics_default = misclassCounts(as.numeric(as.factor(predict_unseen))-1,as.numeric(testDiabetesY)-1)
+```
+
+
+```R
+metrics_default
+```
+#cp
+```R
+sensitivities = vector(mode = 'list')
+error_cp = data.frame(matrix(ncol = 3, nrow = 0))
+```
+
+
+```R
+cps = c(0, 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.1)
+```
+
+
+```R
+for (cp in seq(0,0.1,0.01)) {
+    control = rpart.control(cp = cp)
+    fit_cp <- rpart(trainDiabetesY~., data = trainDiabetes, method = 'class', control = control)
+    predict_unseen_cp <-predict(fit_cp, testDiabetes, type = 'class')
+    table = table(testDiabetesY, predict_unseen_cp)
+    metrics_cp = misclassCounts(as.numeric(as.factor(predict_unseen_cp))-1,as.numeric(testDiabetesY)-1)
+    sensitivities = append(sensitivities, metrics_cp$metrics$Sens)
+    trainDiabetesPred_cp = predict(fit_cp, trainDiabetes, type = 'class')
+    testDiabetesPred_cp = predict(fit_cp, testDiabetes, type = 'class')
+    trainError_cp = 1 - sum(trainDiabetesPred_cp==trainDiabetesY)/length(trainDiabetesY)
+    testError_cp = 1 - sum(testDiabetesPred_cp==testDiabetesY)/length(testDiabetesY)
+    error_cp = rbind(error_cp,data.frame(cp,trainError_cp,testError_cp))
+}
+maxY = max(error_cp$trainError_cp, error_cp$testError_cp)
+```
+
+
+```R
+sens <- do.call(rbind, Map(data.frame, cp_values = cps, sensitivities = sensitivities))
+```
+
+
+```R
+ggplot(sens, aes(x = cp_values, y = sensitivities)) + geom_line() + geom_point() + labs(x = 'Value of cp', y = 'Sensitivity')
+```
+```R
+#create the empty plot with some parameters
+plot(error_cp[,1],main="Evolution of the train and test errors",xlab="Value of cp",ylab="Error",ylim = c(0,maxY),type="n",xaxt="n")
+#set the axis for the number of values
+axis(1, 1:length(error_cp[,1]), error_cp[,1])
+#plot the error for the training data
+lines(error_cp[,2],type="b",col='red',pch=20)
+#plot the error for the testing data
+lines(error_cp[,3],type="b",col='blue',pch=20)
+legend("bottomright",lty=1,col=c("red","blue"),legend = c("Train ", "Test "))
+```
+
+```R
+ncols = length(trainDiabetes)
+cp = 0.02
+
+for(column1 in seq(1,ncols-1,1)){
+  #select a diferent second column that has not been a first columns
+  for(column2 in seq(column1+1,ncols,1)){
+    #get the values from the first column
+    attribute1 = trainDiabetes[column1]
+    #get the values from the second column
+    attribute2 = trainDiabetes[column2]
+    #turn the target variable into a number (for visualization purposes)
+    target = as.numeric(trainDiabetesY)
+    
+    #create points in the x axis
+    gridX = seq(
+      min(attribute1),max(attribute1),
+      (max(attribute1)-min(attribute1))/100
+    )
+    #create points in the y axis
+    gridY = seq(
+      min(attribute2),max(attribute2),
+      (max(attribute2)-min(attribute2))/100
+    )
+    #create a grid with the points
+    grid = as.matrix(expand.grid(gridX,gridY))
+    #get grid height
+    gridWidth = length(gridX)
+    #get grid width
+    gridHeight = length(gridY)
+  
+    #plot the datapoints
+    plot(
+      data.frame(attribute1,attribute2), #create a data frame with the two selected columns
+      col=ifelse(target==1,"blue","red"), #set the colors in wich to draw the points (based on target value)
+      pch=20,cex=1.5,cex.lab=1.4 #visualization parameters
+    )
+    
+    #get the predicted values for each element of the grid
+    control = rpart.control(cp = cp)
+    fit_cp_2 <- rpart(trainDiabetes[,c(column1,column2)], data = trainDiabetes, method = 'class', control = control)
+    pred = as.numeric(predict(fit_cp_2, trainDiabetes, type = 'class'))
+    #add the grid points to the plot
+    points(grid,pch='.',col=ifelse(pred==1,"blue","red"))
+    #add the decision boundary to the plot
+    contour(gridX,gridY,matrix(pred,gridWidth,gridHeight),levels=1.5, add=TRUE, d=FALSE, lty=1)
+  }
+}
+```
+#minsplit
+
+```R
+sens_minsplit  = vector(mode = 'list')
+error_minsplit = data.frame(matrix(ncol = 3, nrow = 0))
+```
+
+
+```R
+for (minsplit in seq(20,40,1)) {
+    control = rpart.control(minsplit = minsplit)
+    fit_minsplit <- rpart(trainDiabetesY~., data = trainDiabetes, method = 'class', control = control)
+    predict_unseen_minsplit <-predict(fit_minsplit, testDiabetes, type = 'class')
+    table = table(testDiabetesY, predict_unseen_minsplit)
+    metrics_tuned = misclassCounts(as.numeric(as.factor(predict_unseen_minsplit))-1,as.numeric(testDiabetesY)-1)
+    sens_minsplit = append(sens_minsplit, metrics_tuned$metrics$Sens)
+    trainDiabetesPred_minsplit = predict(fit_minsplit, trainDiabetes, type = 'class')
+    testDiabetesPred_minsplit = predict(fit_minsplit, testDiabetes, type = 'class')
+    trainError_minsplit = 1 - sum(trainDiabetesPred_minsplit==trainDiabetesY)/length(trainDiabetesY)
+    testError_minsplit = 1 - sum(testDiabetesPred_minsplit==testDiabetesY)/length(testDiabetesY)
+    error_minsplit = rbind(error_minsplit,data.frame(minsplit,trainError_minsplit,testError_minsplit))
+}
+maxY_ms = max(error_minsplit$trainError_minsplit, error_minsplit$testError_minsplit)
+```
+
+
+```R
+values_ms = c(20:40)
+```
+
+
+```R
+ms <- do.call(rbind, Map(data.frame, minsplit_values = values_ms, sensitivities = sens_minsplit))
+```
+
+
+```R
+ggplot(ms, aes(x = minsplit_values, y = sensitivities)) + geom_line() + geom_point() + labs(x = 'Value of minsplit', y = 'Sensitivity')
+```
+```R
+#create the empty plot with some parameters
+plot(error_minsplit[,1],main="Evolution of the train and test errors",xlab="Value of minsplit",ylab="Error",ylim = c(0,maxY_ms),type="n",xaxt="n")
+#set the axis for the number of neighbours (k)
+axis(1, 1:length(error_minsplit[,1]), error_minsplit[,1])
+#plot the error for the training data
+lines(error_minsplit[,2],type="b",col='red',pch=20)
+#plot the error for the testing data
+lines(error_minsplit[,3],type="b",col='blue',pch=20)
+legend("bottomright",lty=1,col=c("red","blue"),legend = c("Train ", "Test "))
+```
+```R
+ncols = length(trainDiabetes)
+minsplit = 29
+
+for(column1 in seq(1,ncols-1,1)){
+  #select a diferent second column that has not been a first columns
+  for(column2 in seq(column1+1,ncols,1)){
+    #get the values from the first column
+    attribute1 = trainDiabetes[column1]
+    #get the values from the second column
+    attribute2 = trainDiabetes[column2]
+    #turn the target variable into a number (for visualization purposes)
+    target = as.numeric(trainDiabetesY)
+    
+    #create points in the x axis
+    gridX = seq(
+      min(attribute1),max(attribute1),
+      (max(attribute1)-min(attribute1))/100
+    )
+    #create points in the y axis
+    gridY = seq(
+      min(attribute2),max(attribute2),
+      (max(attribute2)-min(attribute2))/100
+    )
+    #create a grid with the points
+    grid = as.matrix(expand.grid(gridX,gridY))
+    #get grid height
+    gridWidth = length(gridX)
+    #get grid width
+    gridHeight = length(gridY)
+  
+    #plot the datapoints
+    plot(
+      data.frame(attribute1,attribute2), #create a data frame with the two selected columns
+      col=ifelse(target==1,"blue","red"), #set the colors in wich to draw the points (based on target value)
+      pch=20,cex=1.5,cex.lab=1.4 #visualization parameters
+    )
+    
+    #get the predicted values for each element of the grid
+    control = rpart.control(minsplit = minsplit)
+    fit_minsplit_2 <- rpart(trainDiabetes[,c(column1,column2)], data = trainDiabetes, method = 'class', control = control)
+    pred = as.numeric(predict(fit_minsplit_2, trainDiabetes, type = 'class'))
+    #add the grid points to the plot
+    points(grid,pch='.',col=ifelse(pred==1,"blue","red"))
+    #add the decision boundary to the plot
+    contour(gridX,gridY,matrix(pred,gridWidth,gridHeight),levels=1.5, add=TRUE, d=FALSE, lty=1)
+  }
+}
+```
+#minbucket
+```R
+sens_minbucket  = vector(mode = 'list')
+error_minbucket = data.frame(matrix(ncol = 3, nrow = 0))
+```
+
+
+```R
+for (minbucket in seq(20/3,40/3,1)) {
+    control = rpart.control(minbucket = minbucket)
+    fit_minbucket <- rpart(trainDiabetesY~., data = trainDiabetes, method = 'class', control = control)
+    predict_unseen_minbucket <-predict(fit_minbucket, testDiabetes, type = 'class')
+    table = table(testDiabetesY, predict_unseen_minbucket)
+    metrics_tuned = misclassCounts(as.numeric(as.factor(predict_unseen_minbucket))-1,as.numeric(testDiabetesY)-1)
+    sens_minbucket = append(sens_minbucket, metrics_tuned$metrics$Sens)
+    trainDiabetesPred_minbucket = predict(fit_minbucket, trainDiabetes, type = 'class')
+    testDiabetesPred_minbucket = predict(fit_minbucket, testDiabetes, type = 'class')
+    trainError_minbucket = 1 - sum(trainDiabetesPred_minbucket==trainDiabetesY)/length(trainDiabetesY)
+    testError_minbucket = 1 - sum(testDiabetesPred_minbucket==testDiabetesY)/length(testDiabetesY)
+    error_minbucket = rbind(error_minbucket,data.frame(minbucket,trainError_minbucket,testError_minbucket))
+}
+maxY_mb = max(error_minbucket$trainError_minbucket, error_minbucket$testError_minbucket)
+```
+
+
+```R
+values_mb = c(20/3:40/3)
+```
+
+
+```R
+mb <- do.call(rbind, Map(data.frame, minbucket_values = values_mb, sensitivities = sens_minbucket))
+```
+
+    Warning message in mapply(FUN = f, ..., SIMPLIFY = FALSE):
+    "longer argument not a multiple of length of shorter"
+
+
+```R
+ggplot(mb, aes(x = minbucket_values, y = sensitivities)) + geom_line() + geom_point() + labs(x = 'Value of minbucket', y = 'Sensitivity')
+```
+```R
+#create the empty plot with some parameters
+plot(error_minbucket[,1],main="Evolution of the train and test errors",xlab="Value of minbucket",ylab="Error",ylim = c(0,maxY_mb),type="n",xaxt="n")
+#set the axis for the number of neighbours (k)
+axis(1, 1:length(error_minbucket[,1]), error_minbucket[,1])
+#plot the error for the training data
+lines(error_minbucket[,2],type="b",col='red',pch=20)
+#plot the error for the testing data
+lines(error_minbucket[,3],type="b",col='blue',pch=20)
+legend("bottomright",lty=1,col=c("red","blue"),legend = c("Train ", "Test "))
+```
+```R
+ncols = length(trainDiabetes)
+minbucket = 10.67
+
+for(column1 in seq(1,ncols-1,1)){
+  #select a diferent second column that has not been a first columns
+  for(column2 in seq(column1+1,ncols,1)){
+    #get the values from the first column
+    attribute1 = trainDiabetes[column1]
+    #get the values from the second column
+    attribute2 = trainDiabetes[column2]
+    #turn the target variable into a number (for visualization purposes)
+    target = as.numeric(trainDiabetesY)
+    
+    #create points in the x axis
+    gridX = seq(
+      min(attribute1),max(attribute1),
+      (max(attribute1)-min(attribute1))/100
+    )
+    #create points in the y axis
+    gridY = seq(
+      min(attribute2),max(attribute2),
+      (max(attribute2)-min(attribute2))/100
+    )
+    #create a grid with the points
+    grid = as.matrix(expand.grid(gridX,gridY))
+    #get grid height
+    gridWidth = length(gridX)
+    #get grid width
+    gridHeight = length(gridY)
+  
+    #plot the datapoints
+    plot(
+      data.frame(attribute1,attribute2), #create a data frame with the two selected columns
+      col=ifelse(target==1,"blue","red"), #set the colors in wich to draw the points (based on target value)
+      pch=20,cex=1.5,cex.lab=1.4 #visualization parameters
+    )
+    
+    #get the predicted values for each element of the grid
+    control = rpart.control(minucket = minucket)
+    fit_minucket_2 <- rpart(trainDiabetes[,c(column1,column2)], data = trainDiabetes, method = 'class', control = control)
+    pred = as.numeric(predict(fit_minucket_2, trainDiabetes, type = 'class'))
+    #add the grid points to the plot
+    points(grid,pch='.',col=ifelse(pred==1,"blue","red"))
+    #add the decision boundary to the plot
+    contour(gridX,gridY,matrix(pred,gridWidth,gridHeight),levels=1.5, add=TRUE, d=FALSE, lty=1)
+  }
+}
+```
+#depth
+```R
+sens_depth = vector(mode = 'list')
+error_depth = data.frame(matrix(ncol = 3, nrow = 0))
+```
+
+
+```R
+for (maxdepth in seq(2,6,1)) {
+    control = rpart.control(maxdepth = maxdepth)
+    fit_depth <- rpart(trainDiabetesY~., data = trainDiabetes, method = 'class', control = control)
+    predict_unseen_depth <-predict(fit_depth, testDiabetes, type = 'class')
+    table = table(testDiabetesY, predict_unseen_depth)
+    metrics_tuned = misclassCounts(as.numeric(as.factor(predict_unseen_depth))-1,as.numeric(testDiabetesY)-1)
+    sens_depth = append(sens_depth, metrics_tuned$metrics$Sens)
+    trainDiabetesPred_depth = predict(fit_depth, trainDiabetes, type = 'class')
+    testDiabetesPred_depth = predict(fit_depth, testDiabetes, type = 'class')
+    trainError_depth = 1 - sum(trainDiabetesPred_depth==trainDiabetesY)/length(trainDiabetesY)
+    testError_depth = 1 - sum(testDiabetesPred_depth==testDiabetesY)/length(testDiabetesY)
+    error_depth = rbind(error_depth,data.frame(maxdepth,trainError_depth,testError_depth))
+}
+maxY_d = max(error_depth$trainError_depth, error_depth$testError_depth)
+```
+
+
+```R
+values_depth = c(2:6)
+```
+
+
+```R
+md <- do.call(rbind, Map(data.frame, maxdepth_values = values_depth, sensitivities = sens_depth))
+```
+
+
+```R
+ggplot(md, aes(x = maxdepth_values, y = sensitivities)) + geom_line() + geom_point() + labs(x = 'Value of maxdepth', y = 'Sensitivity')
+```
+```R
+#create the empty plot with some parameters
+plot(error_depth[,1],main="Evolution of the train and test errors",xlab="Value of maxdepth",ylab="Error",ylim = c(0,maxY_d),type="n",xaxt="n")
+#set the axis for the number of neighbours (k)
+axis(1, 1:length(error_depth[,1]), error_depth[,1])
+#plot the error for the training data
+lines(error_depth[,2],type="b",col='red',pch=20)
+#plot the error for the testing data
+lines(error_depth[,3],type="b",col='blue',pch=20)
+legend("bottomright",lty=1,col=c("red","blue"),legend = c("Train ", "Test "))
+```
+
+```R
+ncols = length(trainDiabetes)
+depth = 5
+
+for(column1 in seq(1,ncols-1,1)){
+  #select a diferent second column that has not been a first columns
+  for(column2 in seq(column1+1,ncols,1)){
+    #get the values from the first column
+    attribute1 = trainDiabetes[column1]
+    #get the values from the second column
+    attribute2 = trainDiabetes[column2]
+    #turn the target variable into a number (for visualization purposes)
+    target = as.numeric(trainDiabetesY)
+    
+    #create points in the x axis
+    gridX = seq(
+      min(attribute1),max(attribute1),
+      (max(attribute1)-min(attribute1))/100
+    )
+    #create points in the y axis
+    gridY = seq(
+      min(attribute2),max(attribute2),
+      (max(attribute2)-min(attribute2))/100
+    )
+    #create a grid with the points
+    grid = as.matrix(expand.grid(gridX,gridY))
+    #get grid height
+    gridWidth = length(gridX)
+    #get grid width
+    gridHeight = length(gridY)
+  
+    #plot the datapoints
+    plot(
+      data.frame(attribute1,attribute2), #create a data frame with the two selected columns
+      col=ifelse(target==1,"blue","red"), #set the colors in wich to draw the points (based on target value)
+      pch=20,cex=1.5,cex.lab=1.4 #visualization parameters
+    )
+    
+    #get the predicted values for each element of the grid
+    control = rpart.control(maxdepth = depth)
+    fit_depth_2 <- rpart(trainDiabetes[,c(column1,column2)], data = trainDiabetes, method = 'class', control = control)
+    pred = as.numeric(predict(fit_depth_2, trainDiabetes, type = 'class'))
+    #add the grid points to the plot
+    points(grid,pch='.',col=ifelse(pred==1,"blue","red"))
+    #add the decision boundary to the plot
+    contour(gridX,gridY,matrix(pred,gridWidth,gridHeight),levels=1.5, add=TRUE, d=FALSE, lty=1)
+  }
+}
+```
